@@ -1,0 +1,37 @@
+# render.yaml - Render.com deployment configuration
+# Place this file at: rag-chatbot/render.yaml
+# Documentation: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: rag-chatbot-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+
+    # ── Environment Variables ──────────────────────────────────────────────────
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false          # Set manually in Render dashboard
+      - key: GEMINI_API_KEY
+        sync: false          # Set manually in Render dashboard
+      - key: STORAGE_PATH
+        value: /var/data     # Render persistent disk mount point
+      - key: MAX_FILE_SIZE_MB
+        value: "10"
+      - key: MAX_DOCS
+        value: "100"
+      - key: DEBUG
+        value: "false"
+      - key: PORT
+        value: "8000"
+
+    # ── Persistent Disk ────────────────────────────────────────────────────────
+    # Keeps hnswlib index across deploys and restarts
+    disk:
+      name: rag-data
+      mountPath: /var/data
+      sizeGB: 1              # Free tier allows 1GB
+
+    # ── Health Check ──────────────────────────────────────────────────────────
+    healthCheckPath: /health

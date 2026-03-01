@@ -1,0 +1,244 @@
+{
+  "info": {
+    "name": "RAG Chatbot API",
+    "_postman_id": "rag-chatbot-collection-v1",
+    "description": "Complete test collection for the Free-Tier RAG Chatbot API.\n\nSetup:\n1. Set the `base_url` variable to your API URL (e.g., http://localhost:8000)\n2. Run requests in order: Health → Ingest → Poll Status → Chat → List → Delete",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "description": "Change to your deployed URL for production testing"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "description": "Auto-set after POST /ingest"
+    },
+    {
+      "key": "doc_id",
+      "value": "",
+      "description": "Auto-set after ingestion completes"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health",
+        "description": "Verify the API is running and model is loaded."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Status healthy', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.status).to.equal('healthy');",
+              "  pm.expect(json.model_loaded).to.be.true;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Ingest Document (DOCX)",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/ingest",
+        "description": "Upload a DOCX file for ingestion.\n\nIn Postman:\n1. Select Body → form-data\n2. Add key 'file' with type File\n3. Select your .docx file",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {
+              "key": "file",
+              "type": "file",
+              "src": "",
+              "description": "Select a .pdf, .xlsx, or .docx file"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Has job_id', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.job_id).to.be.a('string');",
+              "  pm.collectionVariables.set('job_id', json.job_id);",
+              "  console.log('Job ID saved:', json.job_id);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Poll Ingestion Status",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/ingest/status/{{job_id}}",
+        "description": "Poll until status is 'completed'. job_id is auto-set by step 2."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "const json = pm.response.json();",
+              "console.log('Job status:', json.status, '| Chunks:', json.chunks_added);",
+              "if (json.status === 'completed' && json.doc_id) {",
+              "  pm.collectionVariables.set('doc_id', json.doc_id);",
+              "  console.log('Doc ID saved:', json.doc_id);",
+              "}",
+              "pm.test('Job exists', () => pm.expect(json.job_id).to.be.a('string'));"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Chat - Simple Query",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/chat",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"What is the main topic of the document?\",\n  \"top_k\": 5\n}"
+        },
+        "description": "Ask a question about ingested documents."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Has answer and citations', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.answer).to.be.a('string').and.not.empty;",
+              "  pm.expect(json.citations).to.be.an('array');",
+              "  pm.expect(json.provider).to.be.oneOf(['groq', 'gemini']);",
+              "  console.log('Provider:', json.provider, '| Fallback:', json.fallback_used, '| Latency:', json.latency_ms + 'ms');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "4b. Chat - With History",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/chat",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"Can you elaborate on the key findings?\",\n  \"top_k\": 5,\n  \"history\": [\n    {\"role\": \"user\", \"content\": \"What is the main topic?\"},\n    {\"role\": \"assistant\", \"content\": \"The document covers...\"}\n  ]\n}"
+        },
+        "description": "Chat with conversation history for multi-turn dialogue."
+      }
+    },
+    {
+      "name": "5. List Documents",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/documents",
+        "description": "List all ingested documents."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Returns document list', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.documents).to.be.an('array');",
+              "  pm.expect(json.total).to.be.a('number');",
+              "  console.log('Total documents:', json.total);",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Delete Document",
+      "request": {
+        "method": "DELETE",
+        "url": "{{base_url}}/documents/{{doc_id}}",
+        "description": "Delete the document ingested in step 2. doc_id is auto-set."
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Status 200', () => pm.response.to.have.status(200));",
+              "pm.test('Deletion successful', () => {",
+              "  const json = pm.response.json();",
+              "  pm.expect(json.success).to.be.true;",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Edge: Ingest PDF",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/ingest",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {"key": "file", "type": "file", "src": "", "description": "Select a .pdf file"}
+          ]
+        }
+      }
+    },
+    {
+      "name": "Edge: Ingest XLSX",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/ingest",
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            {"key": "file", "type": "file", "src": "", "description": "Select a .xlsx file"}
+          ]
+        }
+      }
+    },
+    {
+      "name": "Edge: Chat Empty Store (expect 422)",
+      "request": {
+        "method": "POST",
+        "url": "{{base_url}}/chat",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"Test with no documents\"\n}"
+        }
+      }
+    },
+    {
+      "name": "Edge: Delete Non-existent Doc (expect 404)",
+      "request": {
+        "method": "DELETE",
+        "url": "{{base_url}}/documents/nonexistent-doc-id-12345"
+      }
+    }
+  ]
+}
