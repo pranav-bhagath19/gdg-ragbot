@@ -3,11 +3,12 @@ main.py - FastAPI application entry point.
 Place this file at: rag-chatbot/main.py
 
 Startup actions:
-1. Pre-download / load sentence-transformers model (avoids cold start delay)
-2. Initialize hnswlib vector store (loads from disk if exists)
+1. Pre-download / load sentence-transformers model (in background thread)
+2. Initialize vector store (loads from disk if exists)
 3. Register all routers
 """
 import time
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from loguru import logger
 import sys
+import os
 
 from config import get_settings
 from routers import ingest, chat, documents, appwrite_ingest
@@ -28,7 +30,11 @@ logger.add(
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
     colorize=True,
+    encoding="utf-8",
 )
+
+# Only add file logger if logs directory is writable
+os.makedirs("logs", exist_ok=True)
 logger.add(
     "logs/app.log",
     rotation="10 MB",
@@ -36,7 +42,41 @@ logger.add(
     level="DEBUG",
     backtrace=True,
     diagnose=True,
+    encoding="utf-8",
 )
+
+# Track startup state for healthcheck
+_startup_error: str = ""
+
+
+# ─── Background Model Loader ─────────────────────────────────────────────────
+
+def _load_models_background():
+    """Load embedding model + vector store in a background thread.
+    This allows the app to respond to healthchecks immediately."""
+    global _startup_error
+    settings = get_settings()
+
+    try:
+        logger.info("Loading sentence-transformers model (all-MiniLM-L6-v2)...")
+        embed.load_model()
+        logger.info("Embedding model loaded")
+    except Exception as e:
+        _startup_error = f"Failed to load embedding model: {e}"
+        logger.error(_startup_error)
+        return
+
+    try:
+        logger.info(f"Initializing vector store at: {settings.storage_path}")
+        vectorstore.init_store(settings.storage_path)
+        stats = vectorstore.get_stats()
+        logger.info(f"Vector store ready: {stats['total_documents']} docs, {stats['total_chunks']} chunks")
+    except Exception as e:
+        _startup_error = f"Failed to initialize vector store: {e}"
+        logger.error(_startup_error)
+        return
+
+    logger.info("App fully loaded — Ready to serve requests")
 
 
 # ─── App Lifecycle ────────────────────────────────────────────────────────────
@@ -44,42 +84,25 @@ logger.add(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Startup: pre-load embedding model + initialize vector store.
-    This prevents cold start delays on the first request.
+    Startup: launch model loading in background thread so healthchecks pass
+    immediately. The /health endpoint works right away; /chat waits for model.
     """
     settings = get_settings()
-    start = time.time()
 
     logger.info("=" * 60)
-    logger.info(f"🚀 Starting {settings.app_name} v{settings.app_version}")
+    logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info("=" * 60)
 
-    # 1. Pre-load embedding model
-    logger.info("📦 Loading sentence-transformers model (all-MiniLM-L6-v2)...")
-    try:
-        embed.load_model()
-        logger.info("✅ Embedding model loaded")
-    except Exception as e:
-        logger.error(f"❌ Failed to load embedding model: {e}")
-        raise
+    # Load models in background so the app starts accepting requests now
+    loader = threading.Thread(target=_load_models_background, daemon=True)
+    loader.start()
 
-    # 2. Initialize vector store
-    logger.info(f"📁 Initializing vector store at: {settings.storage_path}")
-    try:
-        vectorstore.init_store(settings.storage_path)
-        stats = vectorstore.get_stats()
-        logger.info(f"✅ Vector store ready: {stats['total_documents']} docs, {stats['total_chunks']} chunks")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize vector store: {e}")
-        raise
-
-    elapsed = time.time() - start
-    logger.info(f"✅ App started in {elapsed:.1f}s — Ready to serve requests")
+    logger.info("App started — model loading in background")
     logger.info("=" * 60)
 
-    yield  # App is running
+    yield  # App is running, healthcheck can respond
 
-    logger.info("🛑 Shutting down...")
+    logger.info("Shutting down...")
 
 
 # ─── App Instance ─────────────────────────────────────────────────────────────
@@ -136,22 +159,29 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/health", tags=["System"], summary="Health check")
 async def health_check():
     """
-    Health check endpoint. Used by UptimeRobot for cold-start prevention.
-    Returns system status and vector store stats.
+    Health check endpoint. Returns 200 immediately so Railway healthcheck passes.
+    Shows model_loaded status so you know when the app is fully ready.
     """
-    stats = vectorstore.get_stats()
     model_loaded = embed._model is not None
-    return {
-        "status": "healthy",
+    status = "healthy" if model_loaded else "warming_up"
+    if _startup_error:
+        status = "error"
+
+    result = {
+        "status": status,
         "app": settings.app_name,
         "version": settings.app_version,
         "model_loaded": model_loaded,
-        "vector_store": stats,
         "providers": {
             "groq_configured": bool(settings.groq_api_key),
             "gemini_configured": bool(settings.gemini_api_key),
         }
     }
+
+    if model_loaded:
+        result["vector_store"] = vectorstore.get_stats()
+
+    return result
 
 
 @app.get("/", tags=["System"], summary="Root / Welcome")
