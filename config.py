@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # ── Rate limiting ─────────────────────────────────────────
     rate_limit_per_minute: int = 30
 
+    # ── Appwrite ──────────────────────────────────────────────
+    appwrite_endpoint: str = ""
+    appwrite_project_id: str = ""
+    appwrite_api_key: str = ""
+    appwrite_bucket_id: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -17,7 +17,7 @@ from loguru import logger
 import sys
 
 from config import get_settings
-from routers import ingest, chat, documents
+from routers import ingest, chat, documents, appwrite_ingest
 from services import embed, vectorstore
 
 # ─── Logging Configuration ────────────────────────────────────────────────────
@@ -170,6 +170,7 @@ async def root():
 app.include_router(ingest.router, tags=["Ingestion"])
 app.include_router(chat.router, tags=["Chat"])
 app.include_router(documents.router, tags=["Documents"])
+app.include_router(appwrite_ingest.router, tags=["Appwrite Ingestion"])
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
