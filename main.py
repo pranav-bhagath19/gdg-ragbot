@@ -3,12 +3,10 @@ main.py - FastAPI application entry point.
 Place this file at: rag-chatbot/main.py
 
 Startup actions:
-1. Pre-download / load sentence-transformers model (in background thread)
-2. Initialize vector store (loads from disk if exists)
+1. Initialize vector store (loads from disk if exists) — fast, no heavy imports
+2. Embedding model loads LAZILY on first /chat or /ingest request
 3. Register all routers
 """
-import time
-import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -45,47 +43,15 @@ logger.add(
     encoding="utf-8",
 )
 
-# Track startup state for healthcheck
-_startup_error: str = ""
-
-
-# ─── Background Model Loader ─────────────────────────────────────────────────
-
-def _load_models_background():
-    """Load embedding model + vector store in a background thread.
-    This allows the app to respond to healthchecks immediately."""
-    global _startup_error
-    settings = get_settings()
-
-    try:
-        logger.info("Loading sentence-transformers model (all-MiniLM-L6-v2)...")
-        embed.load_model()
-        logger.info("Embedding model loaded")
-    except Exception as e:
-        _startup_error = f"Failed to load embedding model: {e}"
-        logger.error(_startup_error)
-        return
-
-    try:
-        logger.info(f"Initializing vector store at: {settings.storage_path}")
-        vectorstore.init_store(settings.storage_path)
-        stats = vectorstore.get_stats()
-        logger.info(f"Vector store ready: {stats['total_documents']} docs, {stats['total_chunks']} chunks")
-    except Exception as e:
-        _startup_error = f"Failed to initialize vector store: {e}"
-        logger.error(_startup_error)
-        return
-
-    logger.info("App fully loaded — Ready to serve requests")
-
 
 # ─── App Lifecycle ────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Startup: launch model loading in background thread so healthchecks pass
-    immediately. The /health endpoint works right away; /chat waits for model.
+    Startup: only initialize the vector store (fast — reads JSON/numpy files).
+    The embedding model loads lazily on first /chat or /ingest request to
+    avoid OOM during startup on memory-constrained platforms like Railway.
     """
     settings = get_settings()
 
@@ -93,14 +59,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.app_name} v{settings.app_version}")
     logger.info("=" * 60)
 
-    # Load models in background so the app starts accepting requests now
-    loader = threading.Thread(target=_load_models_background, daemon=True)
-    loader.start()
+    # Vector store init is fast (reads JSON + numpy from disk, no heavy imports)
+    logger.info(f"Initializing vector store at: {settings.storage_path}")
+    vectorstore.init_store(settings.storage_path)
+    stats = vectorstore.get_stats()
+    logger.info(f"Vector store ready: {stats['total_documents']} docs, {stats['total_chunks']} chunks")
 
-    logger.info("App started — model loading in background")
+    logger.info("App ready — embedding model will load on first request")
     logger.info("=" * 60)
 
-    yield  # App is running, healthcheck can respond
+    yield
 
     logger.info("Shutting down...")
 
@@ -163,25 +131,14 @@ async def health_check():
     Shows model_loaded status so you know when the app is fully ready.
     """
     model_loaded = embed._model is not None
-    status = "healthy" if model_loaded else "warming_up"
-    if _startup_error:
-        status = "error"
 
-    result = {
-        "status": status,
+    return {
+        "status": "healthy" if model_loaded else "warming_up",
         "app": settings.app_name,
         "version": settings.app_version,
         "model_loaded": model_loaded,
-        "providers": {
-            "groq_configured": bool(settings.groq_api_key),
-            "gemini_configured": bool(settings.gemini_api_key),
-        }
+        "vector_store": vectorstore.get_stats(),
     }
-
-    if model_loaded:
-        result["vector_store"] = vectorstore.get_stats()
-
-    return result
 
 
 @app.get("/", tags=["System"], summary="Root / Welcome")

@@ -40,6 +40,9 @@ RUN mkdir -p /app/data /app/logs
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV STORAGE_PATH=/app/data
+# Model is baked into the image — prevent network calls on startup
+ENV HF_HUB_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
 
 # Expose port (Railway overrides this with $PORT)
 EXPOSE 8000
