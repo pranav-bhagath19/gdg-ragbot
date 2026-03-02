@@ -1,28 +1,28 @@
 """
-services/embed.py - Embedding service using sentence-transformers.
+services/embed.py - Embedding service using fastembed (ONNX Runtime).
 Place this file at: rag-chatbot/services/embed.py
 
-The model is loaded ONCE at module import (preloaded).
-This prevents per-request model loading (~10-15s delay).
+Uses ONNX Runtime instead of PyTorch — ~5x smaller image, ~3x less RAM.
+The model is loaded LAZILY on first request to keep startup fast.
 """
 from typing import List
 import numpy as np
 from loguru import logger
 
-# Module-level singleton — loaded once at startup
+# Module-level singleton — loaded on first request
 _model = None
-MODEL_NAME = "all-MiniLM-L6-v2"
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384
 
 
 def load_model():
-    """Load the sentence-transformers model. Called once at app startup."""
+    """Load the fastembed model. Called lazily on first embed request."""
     global _model
     if _model is None:
         logger.info(f"Loading embedding model: {MODEL_NAME} ...")
         try:
-            from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer(MODEL_NAME)
+            from fastembed import TextEmbedding
+            _model = TextEmbedding(MODEL_NAME)
             logger.info(f"Embedding model loaded successfully. Dim={EMBEDDING_DIM}")
         except Exception as e:
             logger.error(f"Failed to load embedding model: {e}")
@@ -42,19 +42,13 @@ def embed_texts(texts: List[str]) -> np.ndarray:
     """
     Embed a list of text strings.
     Returns numpy array of shape (len(texts), EMBEDDING_DIM).
-    ~15ms per chunk on CPU.
     """
     if not texts:
         return np.array([]).reshape(0, EMBEDDING_DIM)
 
     model = get_model()
     try:
-        embeddings = model.encode(
-            texts,
-            batch_size=32,
-            show_progress_bar=False,
-            normalize_embeddings=True,  # L2-normalize for cosine similarity
-        )
+        embeddings = list(model.embed(texts))
         return np.array(embeddings, dtype=np.float32)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
