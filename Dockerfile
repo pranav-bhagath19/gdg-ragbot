@@ -1,14 +1,14 @@
 # ─── Dockerfile ───────────────────────────────────────────────────────────────
 # Production-ready Docker image for the RAG Chatbot API
-# Pre-downloads the sentence-transformers model to avoid cold start delays
+# Optimized for size: CPU-only PyTorch, no CUDA (~3.5GB instead of 6.5GB)
 
 FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install system dependencies, build wheels, then remove build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -16,14 +16,19 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first (Docker layer caching optimization)
 COPY requirements.txt .
 
-# Install Python dependencies
+# Install CPU-only PyTorch first (saves ~1.5GB vs full torch with CUDA)
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir torch==2.3.1 --index-url https://download.pytorch.org/whl/cpu && \
     pip install --no-cache-dir -r requirements.txt
 
+# Remove build tools to save space
+RUN apt-get purge -y build-essential && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
+
 # ── PRE-DOWNLOAD EMBEDDING MODEL ──────────────────────────────────────────────
-# This bakes the ~90MB model into the image so the first request doesn't
-# trigger a download (which would take 10-15s and violate our <4s target).
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2'); print('Model pre-downloaded ✅')"
+# Bakes the ~90MB model into the image to avoid cold start download
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2'); print('Model pre-downloaded')"
 
 # Copy application code
 COPY . .
