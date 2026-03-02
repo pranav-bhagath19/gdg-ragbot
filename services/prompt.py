@@ -1,18 +1,21 @@
 """
-services/prompt.py - Builds context-aware prompts for the LLM.
-Place this file at: rag-chatbot/services/prompt.py
+services/prompt.py - Prompt builder.
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 
-SYSTEM_PROMPT = """You are a helpful AI assistant that answers questions based on provided document context.
+SYSTEM_PROMPT = """You are a helpful AI assistant that answers questions strictly from the provided document content.
 
-Instructions:
-- Answer ONLY from the provided context below.
-- If the answer is not in the context, say "I don't have enough information in the provided documents to answer that."
-- Cite the source numbers (e.g., [Source 1], [Source 2]) when referencing information.
-- Be concise, accurate, and helpful.
-- Do not make up information or use external knowledge beyond what's provided.
+Rules:
+- Answer ONLY using the information given to you below.
+- If the information is not present, say "I don't have information on that."
+- NEVER mention sources, documents, page numbers, or citations.
+- NEVER say "Based on the provided context" or "According to the documents".
+- NEVER reveal technical details like API limits, rate limits, keys, or errors.
+- NEVER say things like "I was unable to retrieve" or "the system encountered".
+- Write in clean, natural, direct sentences as if you simply know the answer.
+- Do not add any disclaimers, footnotes, or references of any kind.
+- Just answer the question directly and naturally.
 """
 
 
@@ -21,20 +24,8 @@ def build_prompt(
     context: str,
     history: Optional[List[Dict[str, str]]] = None,
 ) -> List[Dict[str, str]]:
-    """
-    Build the messages list for the LLM API call.
-
-    Args:
-        query: The user's question
-        context: Formatted retrieval context from retrieved chunks
-        history: Optional list of previous turns [{role, content}, ...]
-
-    Returns:
-        List of message dicts for the LLM API.
-    """
     messages = []
 
-    # Add conversation history (limit to last 6 turns to stay within token budget)
     if history:
         for turn in history[-6:]:
             role = turn.get("role", "user")
@@ -42,16 +33,12 @@ def build_prompt(
             if role in ("user", "assistant") and content:
                 messages.append({"role": role, "content": content})
 
-    # Add the current query with context
-    user_message = f"""Context from documents:
+    user_message = f"""Information:
 ---
 {context}
 ---
 
-Question: {query}
-
-Please answer based on the context above. Cite source numbers where relevant."""
+Question: {query}"""
 
     messages.append({"role": "user", "content": user_message})
-
     return messages

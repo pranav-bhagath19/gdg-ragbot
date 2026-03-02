@@ -1,196 +1,178 @@
 """
-services/llm.py - LLM client with Groq primary and Gemini Flash automatic failover.
-Place this file at: rag-chatbot/services/llm.py
+services/llm.py - LLM client with 4-key rollback chain.
 
-Failover logic:
-1. Try Groq API
-2. If Groq fails (any error) → retry once after 1s
-3. If retry fails → automatically switch to Gemini Flash
-4. Log which provider was used
-5. Return identical response format regardless of provider
+Attempt order:
+1. Groq KEY 1        (GROQ_API_KEY)
+2. Groq KEY 2        (GROQ_API_KEY_BACKUP)
+3. Gemini KEY 1      (GEMINI_API_KEY)
+4. Gemini KEY 2      (GEMINI_API_KEY_BACKUP)
+
+If all 4 fail → returns error to user.
 """
 import asyncio
 import time
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Tuple
 from loguru import logger
 
 from config import get_settings
 
 
-# ─── Groq Client ──────────────────────────────────────────────────────────────
+# ─── Groq caller ──────────────────────────────────────────────────────────────
 
 async def call_groq(
     messages: List[Dict[str, str]],
     system_prompt: str,
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    Call Groq API with Llama 3.1 8B.
-    Returns (answer_text, usage_info).
-    Raises exception on any failure.
-    """
+    api_key: str,
+    key_label: str,
+) -> Tuple[str, Dict]:
     settings = get_settings()
 
-    if not settings.groq_api_key:
-        raise ValueError("GROQ_API_KEY not configured")
+    if not api_key or not api_key.strip():
+        raise ValueError(f"Groq {key_label} key is empty")
 
-    from groq import Groq, APIError, RateLimitError
+    from groq import Groq
 
-    client = Groq(api_key=settings.groq_api_key)
-
+    client = Groq(api_key=api_key.strip())
     all_messages = [{"role": "system", "content": system_prompt}] + messages
 
-    start_time = time.time()
+    start = time.time()
     response = client.chat.completions.create(
         model=settings.groq_model,
         messages=all_messages,
         max_tokens=settings.max_tokens,
         temperature=0.1,
     )
-    elapsed = time.time() - start_time
+    elapsed = time.time() - start
 
     answer = response.choices[0].message.content
     if not answer or not answer.strip():
         raise ValueError("Groq returned empty response")
 
-    usage = {
+    logger.info(f"✅ Groq {key_label} key responded in {elapsed:.2f}s")
+
+    return answer.strip(), {
         "provider": "groq",
+        "key_used": f"groq_{key_label}",
         "model": settings.groq_model,
         "prompt_tokens": response.usage.prompt_tokens,
         "completion_tokens": response.usage.completion_tokens,
         "latency_ms": round(elapsed * 1000),
+        "fallback_used": False,
     }
 
-    logger.info(f"Groq responded in {elapsed:.2f}s | tokens: {response.usage.total_tokens}")
-    return answer.strip(), usage
 
-
-# ─── Gemini Client ─────────────────────────────────────────────────────────────
+# ─── Gemini caller ─────────────────────────────────────────────────────────────
 
 async def call_gemini(
     messages: List[Dict[str, str]],
     system_prompt: str,
-) -> Tuple[str, Dict[str, Any]]:
-    """
-    Call Google Gemini Flash API.
-    Returns (answer_text, usage_info).
-    Raises exception on any failure.
-    """
+    api_key: str,
+    key_label: str,
+) -> Tuple[str, Dict]:
     settings = get_settings()
 
-    if not settings.gemini_api_key:
-        raise ValueError("GEMINI_API_KEY not configured")
+    if not api_key or not api_key.strip():
+        raise ValueError(f"Gemini {key_label} key is empty")
 
     import google.generativeai as genai
 
-    genai.configure(api_key=settings.gemini_api_key)
+    genai.configure(api_key=api_key.strip())
     model = genai.GenerativeModel(
         model_name=settings.gemini_model,
         system_instruction=system_prompt,
     )
 
-    # Convert OpenAI-style messages to Gemini format
+    # Convert to Gemini format
     gemini_history = []
-    current_user_message = None
+    current_user_msg = None
 
     for msg in messages:
-        role = msg["role"]
-        content = msg["content"]
+        if msg["role"] == "user":
+            current_user_msg = msg["content"]
+        elif msg["role"] == "assistant" and current_user_msg:
+            gemini_history.append({"role": "user", "parts": [current_user_msg]})
+            gemini_history.append({"role": "model", "parts": [msg["content"]]})
+            current_user_msg = None
 
-        if role == "user":
-            current_user_message = content
-        elif role == "assistant":
-            if current_user_message:
-                gemini_history.append({"role": "user", "parts": [current_user_message]})
-                gemini_history.append({"role": "model", "parts": [content]})
-                current_user_message = None
+    last_msg = current_user_msg or messages[-1]["content"]
 
-    # The last user message is the actual prompt
-    last_user_msg = current_user_message or messages[-1]["content"]
-
-    start_time = time.time()
-
-    # Start chat with history if any
+    start = time.time()
     if gemini_history:
         chat = model.start_chat(history=gemini_history)
-        response = chat.send_message(last_user_msg)
+        response = chat.send_message(last_msg)
     else:
-        response = model.generate_content(last_user_msg)
-
-    elapsed = time.time() - start_time
+        response = model.generate_content(last_msg)
+    elapsed = time.time() - start
 
     answer = response.text
     if not answer or not answer.strip():
         raise ValueError("Gemini returned empty response")
 
-    usage = {
+    logger.info(f"✅ Gemini {key_label} key responded in {elapsed:.2f}s")
+
+    return answer.strip(), {
         "provider": "gemini",
+        "key_used": f"gemini_{key_label}",
         "model": settings.gemini_model,
         "prompt_tokens": getattr(response.usage_metadata, "prompt_token_count", 0),
         "completion_tokens": getattr(response.usage_metadata, "candidates_token_count", 0),
         "latency_ms": round(elapsed * 1000),
+        "fallback_used": True,
     }
 
-    logger.info(f"Gemini responded in {elapsed:.2f}s")
-    return answer.strip(), usage
 
-
-# ─── Failover Manager ──────────────────────────────────────────────────────────
+# ─── Main failover chain ───────────────────────────────────────────────────────
 
 async def call_llm_with_failover(
     messages: List[Dict[str, str]],
     system_prompt: str,
-) -> Tuple[str, Dict[str, Any]]:
+) -> Tuple[str, Dict]:
     """
-    Primary LLM router with automatic Groq → Gemini failover.
-
-    Flow:
-    1. Try Groq
-    2. If Groq fails → wait 1s → retry Groq once
-    3. If retry fails → switch to Gemini Flash
-    4. Log which provider was used
-    5. Return (answer, usage_info) — same format regardless of provider
-
-    Raises RuntimeError only if BOTH providers fail.
+    Tries all 4 keys in order:
+    1. Groq key 1
+    2. Groq key 2
+    3. Gemini key 1
+    4. Gemini key 2
     """
-    groq_errors = []
+    settings = get_settings()
+    all_errors = []
 
-    # ── Attempt 1: Groq ─────────────────────────────────────────────────────
-    logger.debug("Attempting Groq API call...")
-    try:
-        answer, usage = await call_groq(messages, system_prompt)
-        usage["fallback_used"] = False
-        logger.info(f"✅ LLM provider: GROQ | latency: {usage['latency_ms']}ms")
-        return answer, usage
-    except Exception as e:
-        groq_errors.append(f"Groq attempt 1: {type(e).__name__}: {str(e)[:200]}")
-        logger.warning(f"Groq attempt 1 failed: {type(e).__name__}: {str(e)[:200]}")
+    # Build the attempt chain
+    attempts = [
+        ("groq",   "key1",  settings.groq_api_key),
+        ("groq",   "key2",  settings.groq_api_key_backup),
+        ("gemini", "key1",  settings.gemini_api_key),
+        ("gemini", "key2",  settings.gemini_api_key_backup),
+    ]
 
-    # ── Retry: Groq (after 1s delay) ────────────────────────────────────────
-    logger.debug("Retrying Groq API call after 1s...")
-    await asyncio.sleep(1)
-    try:
-        answer, usage = await call_groq(messages, system_prompt)
-        usage["fallback_used"] = False
-        usage["retry_used"] = True
-        logger.info(f"✅ LLM provider: GROQ (retry) | latency: {usage['latency_ms']}ms")
-        return answer, usage
-    except Exception as e:
-        groq_errors.append(f"Groq attempt 2: {type(e).__name__}: {str(e)[:200]}")
-        logger.warning(f"Groq attempt 2 failed: {type(e).__name__}: {str(e)[:200]}")
+    for provider, key_label, api_key in attempts:
 
-    # ── Fallback: Gemini Flash ───────────────────────────────────────────────
-    logger.info("🔄 Falling back to Gemini Flash...")
-    try:
-        answer, usage = await call_gemini(messages, system_prompt)
-        usage["fallback_used"] = True
-        usage["groq_errors"] = groq_errors
-        logger.info(f"✅ LLM provider: GEMINI FLASH (fallback) | latency: {usage['latency_ms']}ms")
-        return answer, usage
-    except Exception as e:
-        gemini_error = f"Gemini: {type(e).__name__}: {str(e)[:200]}"
-        logger.error(f"Gemini fallback also failed: {gemini_error}")
-        raise RuntimeError(
-            f"All LLM providers failed.\n"
-            f"Groq errors: {groq_errors}\n"
-            f"Gemini error: {gemini_error}"
-        )
+        # Skip if key not configured
+        if not api_key or not api_key.strip():
+            logger.debug(f"Skipping {provider} {key_label} — not configured")
+            continue
+
+        logger.info(f"Trying {provider.upper()} {key_label}...")
+
+        try:
+            if provider == "groq":
+                answer, usage = await call_groq(messages, system_prompt, api_key, key_label)
+            else:
+                answer, usage = await call_gemini(messages, system_prompt, api_key, key_label)
+
+            # Success — log which key worked and return
+            logger.info(f"✅ SUCCESS — {provider.upper()} {key_label} | latency: {usage['latency_ms']}ms")
+            usage["attempt"] = f"{provider}_{key_label}"
+            return answer, usage
+
+        except Exception as e:
+            err = f"{provider} {key_label}: {type(e).__name__}: {str(e)[:150]}"
+            all_errors.append(err)
+            logger.warning(f"❌ Failed — {err}")
+
+            # Small delay before next attempt
+            await asyncio.sleep(1)
+
+    # All 4 failed
+    error_summary = "\n".join(f"  - {e}" for e in all_errors)
+    raise RuntimeError(f"All 4 API keys failed:\n{error_summary}")
