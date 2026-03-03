@@ -23,8 +23,6 @@ services:
         value: "100"
       - key: DEBUG
         value: "false"
-      - key: PORT
-        value: "8000"
 
     # ── Persistent Disk ────────────────────────────────────────────────────────
     # Keeps hnswlib index across deploys and restarts
