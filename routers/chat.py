@@ -34,6 +34,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
+    citations: List[Dict] = []
     provider: str
     model: str
     fallback_used: bool
@@ -83,16 +84,13 @@ async def chat(
             latency_ms=0,
         )
 
-    # No documents — return friendly message
+    # No documents — raise 422
     stats = vectorstore.get_stats()
     if stats["total_chunks"] == 0:
         logger.warning("Chat called with empty vector store")
-        return ChatResponse(
-            answer=NO_DOCS_ANSWER,
-            provider="none",
-            model="none",
-            fallback_used=False,
-            latency_ms=0,
+        raise HTTPException(
+            status_code=422,
+            detail="No documents ingested yet. Please upload some documents first.",
         )
 
     # Retrieve relevant chunks
@@ -131,23 +129,17 @@ async def chat(
     try:
         answer, usage = await call_llm_with_failover(messages, SYSTEM_PROMPT)
     except RuntimeError as e:
-        # All 4 keys failed — log internally, show friendly message to user
+        # All 4 keys failed — log internally, return 503
         logger.error(f"All LLM providers failed: {e}")
-        return ChatResponse(
-            answer=FALLBACK_ANSWER,
-            provider="none",
-            model="none",
-            fallback_used=True,
-            latency_ms=round((time.time() - total_start) * 1000),
+        raise HTTPException(
+            status_code=503,
+            detail="All LLM providers are currently unavailable. Please try again later.",
         )
     except Exception as e:
         logger.error(f"Unexpected LLM error: {e}")
-        return ChatResponse(
-            answer=FALLBACK_ANSWER,
-            provider="none",
-            model="none",
-            fallback_used=True,
-            latency_ms=round((time.time() - total_start) * 1000),
+        raise HTTPException(
+            status_code=503,
+            detail="LLM service encountered an unexpected error. Please try again later.",
         )
 
     total_ms = round((time.time() - total_start) * 1000)
@@ -158,6 +150,7 @@ async def chat(
 
     return ChatResponse(
         answer=answer,
+        citations=citations,
         provider=usage.get("provider", "unknown"),
         model=usage.get("model", "unknown"),
         fallback_used=usage.get("fallback_used", False),

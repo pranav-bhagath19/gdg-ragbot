@@ -28,7 +28,6 @@ logger.add(
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
     colorize=True,
-    encoding="utf-8",
 )
 
 # Only add file logger if logs directory is writable
@@ -40,7 +39,6 @@ logger.add(
     level="DEBUG",
     backtrace=True,
     diagnose=True,
-    encoding="utf-8",
 )
 
 
@@ -138,6 +136,12 @@ async def health_check():
         "version": settings.app_version,
         "model_loaded": model_loaded,
         "vector_store": vectorstore.get_stats(),
+        "providers": {
+            "groq": bool(settings.groq_api_key),
+            "groq_backup": bool(settings.groq_api_key_backup),
+            "gemini": bool(settings.gemini_api_key),
+            "gemini_backup": bool(settings.gemini_api_key_backup),
+        },
     }
 
 

@@ -33,8 +33,8 @@ def test_chat_with_mock_data(client):
     ]
 
     with patch("services.vectorstore.get_stats") as mock_stats, \
-         patch("services.retriever.retrieve") as mock_retrieve, \
-         patch("services.llm.call_llm_with_failover") as mock_llm:
+         patch("routers.chat.retrieve") as mock_retrieve, \
+         patch("routers.chat.call_llm_with_failover") as mock_llm:
 
         mock_stats.return_value = {"total_documents": 1, "total_chunks": 5, "index_size": 5}
         mock_retrieve.return_value = mock_chunks
@@ -70,8 +70,8 @@ def test_chat_with_history(client):
                     "chunk_index": 0, "score": 0.9, "doc_id": "d1", "chunk_id": "c1", "type": "pdf"}]
 
     with patch("services.vectorstore.get_stats") as mock_stats, \
-         patch("services.retriever.retrieve", return_value=mock_chunks), \
-         patch("services.llm.call_llm_with_failover") as mock_llm:
+         patch("routers.chat.retrieve", return_value=mock_chunks), \
+         patch("routers.chat.call_llm_with_failover") as mock_llm:
 
         mock_stats.return_value = {"total_documents": 1, "total_chunks": 5, "index_size": 5}
         mock_llm.return_value = ("Answer with history context.", {
@@ -112,8 +112,8 @@ def test_chat_llm_failure_returns_503(client):
                     "chunk_index": 0, "score": 0.9, "doc_id": "d1", "chunk_id": "c1", "type": "pdf"}]
 
     with patch("services.vectorstore.get_stats") as mock_stats, \
-         patch("services.retriever.retrieve", return_value=mock_chunks), \
-         patch("services.llm.call_llm_with_failover") as mock_llm:
+         patch("routers.chat.retrieve", return_value=mock_chunks), \
+         patch("routers.chat.call_llm_with_failover") as mock_llm:
 
         mock_stats.return_value = {"total_documents": 1, "total_chunks": 5, "index_size": 5}
         mock_llm.side_effect = RuntimeError("All providers failed")
