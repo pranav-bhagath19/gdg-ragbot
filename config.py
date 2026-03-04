@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # ── Rate limiting ─────────────────────────────────────────
     rate_limit_per_minute: int = 30
 
+    # ── Pinecone ──────────────────────────────────────────────
+    pinecone_api_key: str = ""
+    pinecone_index_name: str = "ragbot"
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
+
     # ── Appwrite ──────────────────────────────────────────────
     appwrite_endpoint: str = ""
     appwrite_project_id: str = ""

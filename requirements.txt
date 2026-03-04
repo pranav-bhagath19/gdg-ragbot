@@ -14,8 +14,8 @@ pandas==2.2.2
 fastembed>=0.3.0
 numpy==1.26.4
 
-# Vector store
-# hnswlib==0.8.0
+# Vector store (Pinecone cloud)
+pinecone[grpc]>=5.0.0
 
 # LLM clients
 groq==0.9.0
