@@ -15,6 +15,7 @@ from loguru import logger
 
 from appwrite.client import Client
 from appwrite.services.storage import Storage
+from appwrite.query import Query
 
 from config import get_settings, Settings
 from routers.ingest import _process_document, _jobs, ALLOWED_EXTENSIONS
@@ -95,19 +96,34 @@ async def sync_appwrite_bucket(
     storage = _get_appwrite_storage(settings)
     bucket_id = settings.appwrite_bucket_id
 
-    # List files in bucket
+    # List ALL files in bucket (handle pagination — Appwrite defaults to 25)
     try:
-        result = storage.list_files(bucket_id=bucket_id)
+        all_files = []
+        offset = 0
+        limit = 100  # Max per request
+        while True:
+            result = storage.list_files(bucket_id=bucket_id, queries=[
+                Query.limit(limit),
+                Query.offset(offset),
+            ])
+            batch = result.get("files", [])
+            all_files.extend(batch)
+            if len(batch) < limit:
+                break
+            offset += limit
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to list Appwrite files: {e}")
 
-    files = result.get("files", [])
+    files = all_files
     if not files:
         return AppwriteSyncResponse(message="No files found in Appwrite bucket.", jobs=[])
+
+    logger.info(f"Found {len(files)} files in Appwrite bucket")
 
     # Get already-ingested filenames to skip duplicates
     existing_docs = vectorstore.list_documents()
     existing_filenames = {doc.get("filename", "") for doc in existing_docs}
+    logger.info(f"Already ingested: {existing_filenames}")
 
     # Check document limit
     current_count = len(existing_docs)
@@ -120,6 +136,8 @@ async def sync_appwrite_bucket(
         filename = file_info.get("name", "")
         file_id = file_info.get("$id", "")
         ext = Path(filename).suffix.lower()
+
+        logger.info(f"Processing: '{filename}' (id={file_id}, ext={ext})")
 
         # Skip unsupported extensions
         if ext not in ALLOWED_EXTENSIONS:
