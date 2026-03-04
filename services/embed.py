@@ -38,9 +38,9 @@ def get_model():
     return _model
 
 
-def embed_texts(texts: List[str]) -> np.ndarray:
+def embed_texts(texts: List[str], batch_size: int = 32) -> np.ndarray:
     """
-    Embed a list of text strings.
+    Embed a list of text strings in batches to avoid OOM.
     Returns numpy array of shape (len(texts), EMBEDDING_DIM).
     """
     if not texts:
@@ -48,8 +48,13 @@ def embed_texts(texts: List[str]) -> np.ndarray:
 
     model = get_model()
     try:
-        embeddings = list(model.embed(texts))
-        return np.array(embeddings, dtype=np.float32)
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            logger.debug(f"Embedding batch {i // batch_size + 1}/{(len(texts) + batch_size - 1) // batch_size} ({len(batch)} texts)")
+            batch_embeddings = list(model.embed(batch))
+            all_embeddings.extend(batch_embeddings)
+        return np.array(all_embeddings, dtype=np.float32)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
         raise
