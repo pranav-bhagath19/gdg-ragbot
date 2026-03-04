@@ -15,7 +15,7 @@ fastembed>=0.3.0
 numpy==1.26.4
 
 # Vector store (Pinecone cloud)
-pinecone[grpc]>=5.0.0
+pinecone>=5.0.0
 
 # LLM clients
 groq==0.9.0

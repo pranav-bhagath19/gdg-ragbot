@@ -64,7 +64,11 @@ async def lifespan(app: FastAPI):
     stats = vectorstore.get_stats()
     logger.info(f"Vector store ready: {stats['total_documents']} docs, {stats['total_chunks']} chunks")
 
-    logger.info("App ready — embedding model will load on first request")
+    # Pre-load embedding model so first /ingest or /chat request doesn't timeout
+    logger.info("Loading embedding model (this may take 10-30s)...")
+    embed.load_model()
+    logger.info("Embedding model loaded and ready!")
+
     logger.info("=" * 60)
 
     yield
