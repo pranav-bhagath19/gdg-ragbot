@@ -21,9 +21,6 @@ pinecone[grpc]>=5.0.0
 groq==0.9.0
 google-generativeai==0.7.2
 
-# Appwrite
-appwrite>=6.0.0
-
 # Utilities
 httpx==0.27.0
 loguru==0.7.2

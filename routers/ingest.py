@@ -2,14 +2,13 @@
 routers/ingest.py - POST /ingest endpoint for document upload and processing.
 Place this file at: rag-chatbot/routers/ingest.py
 
-Pipeline: upload → validate → upload to Appwrite (if configured) → parse → chunk → embed → upsert to Pinecone
+Pipeline: upload → validate → parse → chunk → embed → upsert to Pinecone
 Uses FastAPI BackgroundTasks so large files don't timeout the HTTP request.
 """
 import uuid
 import asyncio
-import io
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from pathlib import Path
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Depends
@@ -53,45 +52,6 @@ class JobStatusResponse(BaseModel):
     message: str = ""
     created_at: str = ""
     completed_at: str = ""
-    appwrite_file_id: str = ""
-
-
-def _upload_to_appwrite(file_bytes: bytes, filename: str, settings: Settings) -> Optional[str]:
-    """
-    Upload the original file to Appwrite Storage for backup.
-    Returns the Appwrite file ID if successful, None if Appwrite is not configured or upload fails.
-    """
-    if not all([settings.appwrite_endpoint, settings.appwrite_project_id,
-                settings.appwrite_api_key, settings.appwrite_bucket_id]):
-        logger.debug("Appwrite not configured — skipping file backup")
-        return None
-
-    try:
-        from appwrite.client import Client
-        from appwrite.services.storage import Storage
-        from appwrite.input_file import InputFile
-
-        client = Client()
-        client.set_endpoint(settings.appwrite_endpoint)
-        client.set_project(settings.appwrite_project_id)
-        client.set_key(settings.appwrite_api_key)
-
-        storage = Storage(client)
-        file_id = str(uuid.uuid4()).replace("-", "")[:20]  # Appwrite ID format
-
-        result = storage.create_file(
-            bucket_id=settings.appwrite_bucket_id,
-            file_id=file_id,
-            file=InputFile.from_bytes(file_bytes, filename),
-        )
-
-        appwrite_id = result.get("$id", file_id)
-        logger.info(f"✅ File '{filename}' uploaded to Appwrite (id={appwrite_id})")
-        return appwrite_id
-
-    except Exception as e:
-        logger.warning(f"⚠️ Appwrite upload failed for '{filename}': {e} — continuing without backup")
-        return None
 
 
 async def _process_document(
@@ -109,13 +69,6 @@ async def _process_document(
     _jobs[job_id]["doc_id"] = doc_id
 
     try:
-        # Step 0: Upload original file to Appwrite (if configured)
-        logger.info(f"[job={job_id}] Uploading '{filename}' to Appwrite...")
-        _jobs[job_id]["stage"] = "uploading_to_appwrite"
-        appwrite_file_id = _upload_to_appwrite(file_bytes, filename, settings)
-        if appwrite_file_id:
-            _jobs[job_id]["appwrite_file_id"] = appwrite_file_id
-
         # Step 1: Parse
         logger.info(f"[job={job_id}] Parsing '{filename}'...")
         _jobs[job_id]["stage"] = "parsing"
@@ -154,14 +107,13 @@ async def _process_document(
         chunks_added = await vectorstore.add_chunks(embeddings, chunks, doc_id, doc_info)
 
         # Done
-        appwrite_msg = f" | backed up to Appwrite ({appwrite_file_id})" if appwrite_file_id else ""
         _jobs[job_id].update({
             "status": "completed",
             "chunks_added": chunks_added,
             "completed_at": datetime.utcnow().isoformat(),
-            "message": f"Successfully ingested {chunks_added} chunks{appwrite_msg}",
+            "message": f"Successfully ingested {chunks_added} chunks",
         })
-        logger.info(f"[job={job_id}] ✅ Ingestion complete: {chunks_added} chunks for '{filename}'{appwrite_msg}")
+        logger.info(f"[job={job_id}] ✅ Ingestion complete: {chunks_added} chunks for '{filename}'")
 
     except Exception as e:
         logger.error(f"[job={job_id}] ❌ Ingestion failed: {e}")
@@ -228,7 +180,6 @@ async def ingest_document(
         "created_at": datetime.utcnow().isoformat(),
         "completed_at": "",
         "stage": "queued",
-        "appwrite_file_id": "",
     }
 
     # Start background processing

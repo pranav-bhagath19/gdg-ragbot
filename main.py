@@ -17,7 +17,7 @@ import sys
 import os
 
 from config import get_settings
-from routers import ingest, chat, documents, appwrite_ingest
+from routers import ingest, chat, documents
 from services import embed, vectorstore
 
 # ─── Logging Configuration ────────────────────────────────────────────────────
@@ -89,7 +89,7 @@ A Retrieval-Augmented Generation (RAG) API that lets you chat with your document
 - 🔍 Semantic search using sentence-transformers embeddings
 - 🤖 LLM-powered answers via Groq (Llama 3.1 8B) with Gemini Flash fallback
 - 📚 Source citations with document and page references
-- 💾 Persistent vector storage using hnswlib
+- 💾 Persistent vector storage using Pinecone
 
 ### Quick Start
 1. `POST /ingest` — Upload a document
@@ -156,7 +156,6 @@ async def root():
 app.include_router(ingest.router, tags=["Ingestion"])
 app.include_router(chat.router, tags=["Chat"])
 app.include_router(documents.router, tags=["Documents"])
-app.include_router(appwrite_ingest.router, tags=["Appwrite Ingestion"])
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
