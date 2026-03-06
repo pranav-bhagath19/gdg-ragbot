@@ -47,7 +47,11 @@ def parse_xlsx(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             headers = []
-            rows_text = []
+            rows_data = []
+
+            # Fields to skip (noisy, not useful for Q&A)
+            _skip = {"id", "imageurl", "linkedinurl", "bgcolor", "logo", "rank",
+                     "dept_rank", "dept_logo"}
 
             for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
                 # Skip completely empty rows
@@ -55,24 +59,37 @@ def parse_xlsx(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
                     continue
 
                 if row_idx == 0:
-                    # First row is headers
-                    headers = [str(h) if h is not None else f"Col{i}" for i, h in enumerate(row)]
+                    # First row is headers — filter out noisy columns
+                    all_headers = [str(h) if h is not None else f"Col{i}" for i, h in enumerate(row)]
+                    keep_cols = []
+                    for i, h in enumerate(all_headers):
+                        if h.lower().strip() not in _skip:
+                            keep_cols.append(i)
+                    headers = [all_headers[i] for i in keep_cols]
                 else:
-                    # Convert row to natural language: "Header1: value1, Header2: value2"
-                    pairs = []
-                    for i, cell in enumerate(row):
+                    # Extract only kept columns, skip URL values
+                    vals = []
+                    for i in keep_cols:
+                        cell = row[i] if i < len(row) else None
                         if cell is not None:
-                            header = headers[i] if i < len(headers) else f"Col{i}"
-                            pairs.append(f"{header}: {cell}")
-                    if pairs:
-                        rows_text.append(", ".join(pairs))
+                            val = str(cell).strip()
+                            if val.startswith(("http://", "https://")):
+                                val = ""
+                        else:
+                            val = ""
+                        vals.append(val)
+                    if any(v for v in vals):
+                        rows_data.append(vals)
 
-            if rows_text:
-                # Group rows into batches of 5 for better chunking (smaller = less memory)
-                batch_size = 5
-                for batch_start in range(0, len(rows_text), batch_size):
-                    batch = rows_text[batch_start: batch_start + batch_size]
-                    text = f"Sheet: {sheet_name}\n" + "\n".join(batch)
+            if rows_data:
+                # Build compact table: headers once, then pipe-separated rows
+                # This is much more token-efficient than repeating headers per row
+                header_line = " | ".join(headers)
+                batch_size = 10
+                for batch_start in range(0, len(rows_data), batch_size):
+                    batch = rows_data[batch_start: batch_start + batch_size]
+                    row_lines = [" | ".join(v for v in row) for row in batch]
+                    text = f"Sheet: {sheet_name}\n{header_line}\n" + "\n".join(row_lines)
                     chunks.append({
                         "text": text,
                         "page": f"{sheet_name}",

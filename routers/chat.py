@@ -29,7 +29,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
     history: Optional[List[ChatMessage]] = None
-    top_k: Optional[int] = Field(default=5, ge=1, le=20)
+    top_k: Optional[int] = Field(default=15, ge=1, le=50)
 
 
 class ChatResponse(BaseModel):

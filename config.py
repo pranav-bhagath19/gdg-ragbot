@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.1-8b-instant"
     gemini_model: str = "gemini-1.5-flash"
     max_tokens: int = 1024
-    top_k_chunks: int = 5
+    top_k_chunks: int = 15
 
     # ── Chunking ──────────────────────────────────────────────
     chunk_size: int = 512
