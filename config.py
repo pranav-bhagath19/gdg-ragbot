@@ -41,16 +41,17 @@ class Settings(BaseSettings):
     # ── Rate limiting ─────────────────────────────────────────
     rate_limit_per_minute: int = 30
 
-    # ── Appwrite ──────────────────────────────────────────────
-    appwrite_endpoint: str = ""
-    appwrite_project_id: str = ""
-    appwrite_api_key: str = ""
-    appwrite_bucket_id: str = ""
+    # ── Pinecone ──────────────────────────────────────────────
+    pinecone_api_key: str = ""
+    pinecone_index_name: str = "ragbot"
+    pinecone_cloud: str = "aws"
+    pinecone_region: str = "us-east-1"
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"
 
 
 @lru_cache()

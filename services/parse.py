@@ -68,8 +68,8 @@ def parse_xlsx(file_bytes: bytes, filename: str) -> List[Dict[str, Any]]:
                         rows_text.append(", ".join(pairs))
 
             if rows_text:
-                # Group rows into batches of 20 for chunking
-                batch_size = 20
+                # Group rows into batches of 5 for better chunking (smaller = less memory)
+                batch_size = 5
                 for batch_start in range(0, len(rows_text), batch_size):
                     batch = rows_text[batch_start: batch_start + batch_size]
                     text = f"Sheet: {sheet_name}\n" + "\n".join(batch)

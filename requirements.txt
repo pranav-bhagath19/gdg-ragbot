@@ -14,15 +14,12 @@ pandas==2.2.2
 fastembed>=0.3.0
 numpy==1.26.4
 
-# Vector store
-# hnswlib==0.8.0
+# Vector store (Pinecone cloud)
+pinecone>=5.0.0
 
 # LLM clients
 groq==0.9.0
 google-generativeai==0.7.2
-
-# Appwrite
-appwrite>=6.0.0
 
 # Utilities
 httpx==0.27.0
@@ -34,4 +31,3 @@ slowapi==0.1.9
 # Testing
 pytest==8.2.2
 pytest-asyncio==0.23.7
-httpx==0.27.0

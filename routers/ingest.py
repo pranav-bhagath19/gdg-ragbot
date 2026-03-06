@@ -2,7 +2,7 @@
 routers/ingest.py - POST /ingest endpoint for document upload and processing.
 Place this file at: rag-chatbot/routers/ingest.py
 
-Pipeline: upload → validate → parse → chunk → embed → upsert → persist
+Pipeline: upload → validate → parse → chunk → embed → upsert to Pinecone
 Uses FastAPI BackgroundTasks so large files don't timeout the HTTP request.
 """
 import uuid

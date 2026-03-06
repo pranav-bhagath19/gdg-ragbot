@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s http://localhost:8000/openapi.json)",
+      "Bash(python -m json.tool)",
+      "Bash(./venv/Scripts/python.exe -c \"from routers import appwrite_ingest; print\\(''Import OK''\\)\")",
+      "Bash(pkill -f \"uvicorn\")",
+      "Bash(pkill -f \"main:app\")",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 13936)",
+      "Bash(curl -s -X POST http://localhost:8000/ingest/appwrite/sync)"
+    ]
+  }
+}

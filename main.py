@@ -17,7 +17,7 @@ import sys
 import os
 
 from config import get_settings
-from routers import ingest, chat, documents, appwrite_ingest
+from routers import ingest, chat, documents
 from services import embed, vectorstore
 
 # ─── Logging Configuration ────────────────────────────────────────────────────
@@ -28,7 +28,6 @@ logger.add(
     format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
     level="INFO",
     colorize=True,
-    encoding="utf-8",
 )
 
 # Only add file logger if logs directory is writable
@@ -65,7 +64,11 @@ async def lifespan(app: FastAPI):
     stats = vectorstore.get_stats()
     logger.info(f"Vector store ready: {stats['total_documents']} docs, {stats['total_chunks']} chunks")
 
-    logger.info("App ready — embedding model will load on first request")
+    # Pre-load embedding model so first /ingest or /chat request doesn't timeout
+    logger.info("Loading embedding model (this may take 10-30s)...")
+    embed.load_model()
+    logger.info("Embedding model loaded and ready!")
+
     logger.info("=" * 60)
 
     yield
@@ -90,7 +93,7 @@ A Retrieval-Augmented Generation (RAG) API that lets you chat with your document
 - 🔍 Semantic search using sentence-transformers embeddings
 - 🤖 LLM-powered answers via Groq (Llama 3.1 8B) with Gemini Flash fallback
 - 📚 Source citations with document and page references
-- 💾 Persistent vector storage using hnswlib
+- 💾 Persistent vector storage using Pinecone
 
 ### Quick Start
 1. `POST /ingest` — Upload a document
@@ -157,7 +160,6 @@ async def root():
 app.include_router(ingest.router, tags=["Ingestion"])
 app.include_router(chat.router, tags=["Chat"])
 app.include_router(documents.router, tags=["Documents"])
-app.include_router(appwrite_ingest.router, tags=["Appwrite Ingestion"])
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
